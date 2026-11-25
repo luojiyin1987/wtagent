@@ -170,6 +170,7 @@ export class AgentRuntime {
     session,
     approval,
     onEvent,
+    hooks = {},
     limits = DEFAULT_LIMITS,
   }) {
     this.adapter = adapter;
@@ -178,7 +179,37 @@ export class AgentRuntime {
     this.session = session;
     this.approval = approval;
     this.onEvent = onEvent;
+    this.hooks = hooks;
     this.limits = limits;
+  }
+
+  async #runToolHook(name, payload) {
+    const hook = this.hooks[name];
+    if (typeof hook !== "function") {
+      return;
+    }
+    try {
+      // ToolRegistry adds a definition with functions. Hooks only need call data.
+      const { definition, ...toolCall } = payload.toolCall;
+      const snapshot = {
+        ...payload,
+        toolCall: structuredClone(toolCall),
+      };
+      if ("decision" in payload) {
+        snapshot.decision = structuredClone(payload.decision);
+      }
+      if ("result" in payload) {
+        snapshot.result = structuredClone(payload.result);
+      }
+      await hook(snapshot);
+    } catch (error) {
+      await this.emit("tool.hook_failed", {
+        id: payload.toolCall.id,
+        name: payload.toolCall.name,
+        hook: name,
+        message: error?.message ?? String(error),
+      });
+    }
   }
 
   async emit(type, payload = {}) {
@@ -481,6 +512,12 @@ export class AgentRuntime {
       let { result } = plan;
       const grants = plan.decision?.grants;
 
+      await this.#runToolHook("beforeToolCall", {
+        toolCall: plan.call,
+        decision: plan.decision,
+        skipped: Boolean(result),
+      });
+
       if (!result) {
         if (plan.sideEffect) {
           const claimEvent = await this.session.claimSideEffectTool(
@@ -563,6 +600,10 @@ export class AgentRuntime {
       await this.session.setPendingToolResult(
         results.length === 1 ? results[0] : [...results],
       );
+      await this.#runToolHook("afterToolCall", {
+        toolCall: plan.call,
+        result,
+      });
     }
 
     return results;
