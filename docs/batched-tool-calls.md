@@ -31,7 +31,7 @@ One denied or invalid call does not stop another valid call. Approval errors sto
 }
 ```
 
-The runtime calls both hooks once for each batch member, including denied and invalid calls. `skipped` is true when the call already has a result. Hooks observe the call. They do not approve, deny, or change its result. A hook error creates a `tool.hook_failed` event. The runtime continues with the next call.
+The runtime attempts both hooks once for each batch member, including denied and invalid calls. `skipped` is true when the call already has a result. Hooks receive independent snapshots. They do not approve, deny, or change the executed call or saved result. A Hook error or snapshot error creates a `tool.hook_failed` event. The runtime continues when that event is saved and reported. A session write error or event callback error can still stop the batch.
 
 ## Review target
 

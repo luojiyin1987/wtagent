@@ -184,8 +184,24 @@ export class AgentRuntime {
   }
 
   async #runToolHook(name, payload) {
+    const hook = this.hooks[name];
+    if (typeof hook !== "function") {
+      return;
+    }
     try {
-      await this.hooks[name]?.(payload);
+      // ToolRegistry adds a definition with functions. Hooks only need call data.
+      const { definition, ...toolCall } = payload.toolCall;
+      const snapshot = {
+        ...payload,
+        toolCall: structuredClone(toolCall),
+      };
+      if ("decision" in payload) {
+        snapshot.decision = structuredClone(payload.decision);
+      }
+      if ("result" in payload) {
+        snapshot.result = structuredClone(payload.result);
+      }
+      await hook(snapshot);
     } catch (error) {
       await this.emit("tool.hook_failed", {
         id: payload.toolCall.id,
