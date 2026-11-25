@@ -29,6 +29,8 @@ const TOOL_EFFICIENCY = `Tool efficiency:
 - Batch independent tool calls into one response with <tool_calls> instead of reading one obvious related file at a time.
 - Keep dependent or order-sensitive operations in separate turns; the Runtime executes a batch in declared order and does not make dependent calls safe automatically.
 - Prefer several useful independent reads/searches in one batch, then reason over all returned results before requesting another batch.
+- For a routine code review, aim to finish in 2 to 4 model turns. Batch independent reads in the first turn.
+- Use more turns when the review needs new evidence. Do not skip checks only to meet the target.
 - Do not request information already returned earlier.`;
 
 // The protocol + tool catalog are WTAgent-specific transport scaffolding.

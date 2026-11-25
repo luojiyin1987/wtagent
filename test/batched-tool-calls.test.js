@@ -17,6 +17,8 @@ async function createHarness(
     approval = async () => false,
     limits = DEFAULT_LIMITS,
     onEvent = null,
+    hooks = {},
+    policy = new PolicyEngine(),
   } = {},
 ) {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), "wtagent-batch-"));
@@ -35,15 +37,82 @@ async function createHarness(
   const runtime = new AgentRuntime({
     adapter,
     registry: createDefaultToolRegistry(),
-    policy: new PolicyEngine(),
+    policy,
     session,
     approval,
     limits,
     onEvent,
+    hooks,
   });
 
   return { base, projectRoot, adapter, session, runtime };
 }
+
+test("runs approval and hooks for each call without losing result order", async (t) => {
+  const approvals = [];
+  const hookCalls = [];
+  const { adapter, runtime } = await createHarness(t, [
+    `<agent_response><done>false</done><tool_calls>
+      <tool_call id="denied" name="fs.list"><args><path>.</path></args></tool_call>
+      <tool_call id="allowed" name="fs.list"><args><path>.</path></args></tool_call>
+    </tool_calls></agent_response>`,
+    `<agent_response><done>true</done><message>Done.</message></agent_response>`,
+  ], {
+    policy: {
+      evaluate: async () => ({ action: "confirm", reasons: ["mock approval"] }),
+    },
+    approval: async ({ toolCall }) => {
+      approvals.push(toolCall.requestId);
+      return toolCall.requestId === "allowed";
+    },
+    hooks: {
+      beforeToolCall: async ({ toolCall }) => {
+        hookCalls.push(`before:${toolCall.requestId}`);
+      },
+      afterToolCall: async ({ toolCall, result }) => {
+        hookCalls.push(`after:${toolCall.requestId}:${result.ok}`);
+      },
+    },
+  });
+
+  await runtime.run();
+
+  assert.deepEqual(approvals, ["denied", "allowed"]);
+  assert.deepEqual(hookCalls, [
+    "before:denied", "after:denied:false",
+    "before:allowed", "after:allowed:true",
+  ]);
+  const results = adapter.sentMessages[1];
+  assert.ok(results.indexOf('id="denied"') < results.indexOf('id="allowed"'));
+  assert.match(results, /status="error"/);
+  assert.match(results, /status="ok"/);
+});
+
+test("a failed hook does not skip another batch member", async (t) => {
+  const events = [];
+  const completed = [];
+  const { adapter, runtime } = await createHarness(t, [
+    `<agent_response><done>false</done><tool_calls>
+      <tool_call id="first" name="fs.list"><args><path>.</path></args></tool_call>
+      <tool_call id="second" name="fs.list"><args><path>.</path></args></tool_call>
+    </tool_calls></agent_response>`,
+    `<agent_response><done>true</done><message>Done.</message></agent_response>`,
+  ], {
+    hooks: {
+      beforeToolCall: ({ toolCall }) => {
+        if (toolCall.requestId === "first") throw new Error("mock hook failure");
+      },
+      afterToolCall: ({ toolCall }) => completed.push(toolCall.requestId),
+    },
+    onEvent: (event) => events.push(event),
+  });
+
+  await runtime.run();
+
+  assert.deepEqual(completed, ["first", "second"]);
+  assert.equal(events.filter((event) => event.type === "tool.hook_failed").length, 1);
+  assert.equal((adapter.sentMessages[1].match(/status="ok"/g) ?? []).length, 2);
+});
 
 test("executes a batch in declared order and sends one aggregated result", async (t) => {
   const { projectRoot, adapter, session, runtime } = await createHarness(t, [

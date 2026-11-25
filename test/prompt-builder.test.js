@@ -86,6 +86,8 @@ test("bootstrap prompt teaches batching independent tool calls", () => {
   assert.match(web, /Minimize browser\/model round trips/);
   assert.match(web, /Runtime executes a batch in declared order/);
   assert.match(web, /<tool_results>/);
+  assert.match(web, /routine code review, aim to finish in 2 to 4 model turns/);
+  assert.match(web, /Use more turns when the review needs new evidence/);
   assert.doesNotMatch(web, /Call at most one tool per turn/);
 });
 
